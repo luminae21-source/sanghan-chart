@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>상한가 다음날 1분 차트</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2433;--sub:#5b6475;--line:#dfe3e8;--acc:#1f5f8b;--err:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--ink:#e8ebf0;--sub:#9aa3b2;--line:#2f353e;--acc:#4f95cc;--err:#ff7b6b}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;display:grid;place-items:center;min-height:100vh}
+form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:28px 24px;width:min(340px,calc(100vw - 32px));box-sizing:border-box}
+h1{font-size:18px;margin:0 0 4px}
+p{color:var(--sub);margin:0 0 18px;font-size:13px}
+input[type=password]{width:100%;box-sizing:border-box;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+input[type=password]:focus{outline:2px solid var(--acc);outline-offset:1px}
+label{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--sub);margin:10px 0 16px}
+button{width:100%;font:inherit;font-weight:600;padding:10px;border:0;border-radius:8px;background:var(--acc);color:#fff;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+#m{min-height:20px;font-size:13px;margin:10px 0 0;color:var(--sub)}
+#m.e{color:var(--err)}
+</style>
+<script id="lwc" async src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.0.9/dist/lightweight-charts.standalone.production.js" integrity="sha384-6/iv/tWhS2LqjhNmDWcisQfhsuS0IqxtaOo1ZnA8dzgpK1sYsn8Al1icSvt0qirp" crossorigin="anonymous"></script>
+</head>
+<body>
+<form id="f" hidden>
+<h1>상한가 다음날 1분 차트</h1>
+<p>비밀번호를 넣으면 열려요</p>
+<input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호" required>
+<label><input id="keep" type="checkbox" checked> 이 기기에서 기억</label>
+<button id="go">열기</button>
+<div id="m" role="status"></div>
+</form>
+<script>
+(() => {   // 전부 이 안에만 (document.open 뒤에도 전역이 남아서 뷰어의 이름과 부딪히지 않게 — 실측: 'const $' 충돌)
+// 차트·엑셀은 이 비밀번호로 AES-GCM 암호화돼 있음 (v.bin·x.bin) — 비밀번호 → PBKDF2-SHA256 → 키 → 브라우저에서 풀기
+const SALT = 'rIF9ORcuDNntg3EKTNytoQ==', ITER = 600000, K = 'jq_sanghan_key';
+const $ = id => document.getElementById(id);
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const store = (s, v) => { try { const t = window[s]; if (v === undefined) return t.getItem(K); if (v === null) t.removeItem(K); else t.setItem(K, v); } catch (e) { return null; } };
+const msg = (t, err) => { $('m').textContent = t; $('m').className = err ? 'e' : ''; };
+
+async function decrypt(key, url) {
+  const r = await fetch(url, { cache: 'no-cache' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const b = new Uint8Array(await r.arrayBuffer());
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, key, b.slice(12));   // 틀린 키 → OperationError
+}
+
+// 「엑셀 받기」: 누를 때 x.bin을 받아 풀어서 저장
+const excel = r64 => `<script>(() => {
+  const a = document.querySelector('a.xl'); if (!a) return;
+  const name = a.getAttribute('download') || '상한가.xlsx', label = a.textContent;
+  a.removeAttribute('download'); a.href = '#';
+  a.addEventListener('click', async e => {
+    e.preventDefault(); a.textContent = '받는 중…';
+    try {
+      const k = await crypto.subtle.importKey('raw', Uint8Array.from(atob('${r64}'), c => c.charCodeAt(0)), 'AES-GCM', false, ['decrypt']);
+      const r = await fetch('x.bin', { cache: 'no-cache' }); if (!r.ok) throw new Error(r.status);
+      const b = new Uint8Array(await r.arrayBuffer());
+      const x = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, k, b.slice(12));
+      const u = URL.createObjectURL(new Blob([x], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const l = document.createElement('a'); l.href = u; l.download = name; document.body.appendChild(l); l.click(); l.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 60000); a.textContent = label;
+    } catch (err) { a.textContent = '엑셀 받기 실패 — 새로고침 뒤 다시'; }
+  });
+})();<\/script>`;
+
+async function open_(raw, keep) {
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+  const gz = await decrypt(key, 'v.bin');
+  const html = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  const r64 = btoa(String.fromCharCode(...raw));
+  store('sessionStorage', r64); store('localStorage', keep ? r64 : null);
+  await new Promise(r => { const t = $('lwc'); if (window.LightweightCharts || !t) return r(); t.addEventListener('load', r); t.addEventListener('error', r); setTimeout(r, 10000); });
+  const page = window.LightweightCharts ? html.replace(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/lightweight-charts@[^>]*><\/script>/, '') : html;   // 미리 받아졌으면 다시 안 넣음
+  document.open(); document.write(page + excel(r64)); document.close();
+}
+
+const wrong = e => e && e.name === 'OperationError';
+
+$('f').addEventListener('submit', async e => {
+  e.preventDefault(); $('go').disabled = true; msg('여는 중… (처음엔 몇 초 걸려요)');
+  try {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode($('pw').value.trim()), 'PBKDF2', false, ['deriveBits']);
+    const raw = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: b64(SALT), iterations: ITER }, base, 256));
+    await open_(raw, $('keep').checked);
+  } catch (err) {
+    msg(wrong(err) ? '비밀번호가 달라요' : '불러오기 실패 — 인터넷 연결 확인 뒤 다시', true);
+    $('go').disabled = false; $('pw').select();
+  }
+});
+
+(async () => {
+  const saved = store('sessionStorage') || store('localStorage');
+  if (saved) {
+    try { await open_(b64(saved), !!store('localStorage')); return; }
+    catch (err) { if (wrong(err)) { store('sessionStorage', null); store('localStorage', null); } else msg('불러오기 실패 — 인터넷 연결 확인 뒤 새로고침', true); }
+  }
+  $('f').hidden = false; $('pw').focus();
+})();
+})();
+</script>
+</body>
+</html>
